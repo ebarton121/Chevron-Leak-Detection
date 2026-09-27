@@ -1,0 +1,6 @@
+numpy
+pandas
+openpyxl
+opencv-python
+pyserial
+pyyaml

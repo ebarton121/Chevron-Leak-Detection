@@ -1,0 +1,62 @@
+# Sensor config. Camera + extrinsic keys follow FAST-LIVO2's conventions
+# (config/camera_pinhole.yaml and Rcl/Pcl in config/avia.yaml) so values from
+# FAST-Calib or a later FAST-LIVO2 setup can be pasted in unchanged.
+
+lidar:
+  port: /dev/ttyUSB0          # Windows: COM3
+  baud: 230400
+  min_range_mm: 20            # LD06 reports ~0 for no-return; drop those
+  max_range_mm: 12000
+
+thermal:
+  # FLIR Vue Pro R 640 (9 mm, 30 Hz). Live path: camera HDMI/analog out ->
+  # USB capture dongle -> this laptop. The dongle shows up as a webcam.
+  device: 0                   # webcam index of the capture dongle
+  raw16: false                # live output is 8-bit video, not temperatures
+  width: 640
+  height: 480
+  fps: 30
+
+time_offset:
+  # Added to thermal timestamps. Negative = the camera's frames arrive later
+  # than they were exposed (typical). Estimate with scripts/estimate_offset.py.
+  thermal_time_offset_s: 0.0
+
+sync:
+  # Max |t_point - t_frame| to associate a LiDAR point with a thermal frame.
+  # 50 ms ~ half a LiDAR revolution. At 30 Hz each frame still gets the
+  # sweep through the camera view that is closest in time.
+  max_dt_s: 0.05
+
+# --- Thermal intrinsics (FAST-LIVO2 camera_pinhole.yaml keys) --------------
+# FLIR Vue Pro R 640, 9 mm lens, 30 Hz. Focal length from the lens and the
+# 17 um pixel pitch: 9 mm / 0.017 mm = ~529 px. FLIR's analog-output FOV
+# (62 x 49 deg at 640x480) matches this almost exactly. The full-sensor FOV
+# (69 x 56 deg at 640x512) is wider because the 9 mm lens has barrel
+# distortion at the edges, so run a checkerboard calibration before relying
+# on points near the image border (it will fill in cam_d0..d3).
+#
+# PROFILE A (default) - live analog/HDMI into a USB capture dongle, 640x480
+cam_model: Pinhole
+cam_width: 640
+cam_height: 480
+cam_fx: 529.0
+cam_fy: 529.0
+cam_cx: 320.0
+cam_cy: 240.0
+cam_d0: 0.0
+cam_d1: 0.0
+cam_d2: 0.0
+cam_d3: 0.0
+# PROFILE B - 14-bit TIFFs from the SD card, full sensor 640x512:
+#   cam_width: 640, cam_height: 512, cam_cy: 256.0  (others as above)
+
+# --- LiDAR -> camera extrinsic (FAST-LIVO2 Rcl / Pcl) ----------------------
+# p_cam = Rcl * p_lidar + Pcl  (meters). LiDAR frame: x forward, y left, z up,
+# scan plane z = 0. Camera frame: z forward, x right, y down.
+# PLACEHOLDER below = camera looking along LiDAR +x, mounted 5 cm above it.
+extrin_calib:
+  Rcl: [0.0, -1.0,  0.0,
+        0.0,  0.0, -1.0,
+        1.0,  0.0,  0.0]
+  Pcl: [0.0, 0.05, 0.0]
