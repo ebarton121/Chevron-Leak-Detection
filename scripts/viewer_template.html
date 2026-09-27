@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LiDAR + thermal viewer</title>
+<style>
+:root{--bg:#fafaf8;--card:#fff;--ink:#1a1a18;--muted:#6b6a64;--line:#e3e2dc;--acc:#2a78d6}
+@media (prefers-color-scheme:dark){:root{--bg:#161615;--card:#1f1f1d;--ink:#eeede8;--muted:#9a998f;--line:#33332f;--acc:#4a93ea}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:1200px;margin:0 auto;padding:20px}
+h1{font-size:18px;font-weight:600;margin:0 0 2px}.sub{color:var(--muted);margin:0 0 16px}
+.bar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+button{font:inherit;padding:6px 14px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;cursor:pointer}
+input[type=range]{flex:1;min-width:200px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.lbl{font-size:12px;color:var(--muted);margin:0 0 8px}
+canvas{width:100%;display:block}
+.stats{display:flex;gap:20px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:10px}.stats b{color:var(--ink);font-weight:600}
+</style></head><body><main>
+<h1>LiDAR + thermal viewer</h1><p class="sub" id="sub"></p>
+<div class="bar"><button id="play">Pause</button><input type="range" id="sl" min="0" value="0" step="1"><span id="lab" style="min-width:150px;color:var(--muted)"></span></div>
+<div class="grid">
+<div class="card"><p class="lbl">Top-down LiDAR scan (shaded wedge = camera view)</p><canvas id="top" width="800" height="800"></canvas></div>
+<div class="card" id="thCard"><p class="lbl">Thermal frame with associated LiDAR returns (colored by range)</p><canvas id="th"></canvas>
+<p class="lbl" style="margin-top:12px">Thermal value at each LiDAR return vs bearing</p><canvas id="pr" width="800" height="260"></canvas>
+<div class="stats" id="stats"></div></div>
+</div></main>
+<script>
+const P=__PAYLOAD__;
+const $=id=>document.getElementById(id);
+const hasF=P.frames.length>0, revKeys=Object.keys(P.revs).map(Number).sort((a,b)=>a-b);
+const N=hasF?P.frames.length:revKeys.length;
+$('sl').max=N-1;
+$('sub').textContent=P.title+' — '+(hasF?N+' thermal frames':N+' LiDAR revolutions (no thermal frames in this file)');
+if(!hasF){$('thCard').style.display='none';$('top').parentElement.style.maxWidth='720px'}
+const cs=()=>getComputedStyle(document.documentElement);
+const col=v=>cs().getPropertyValue(v).trim();
+const b180=a=>a>180?a-360:a;
+function rangeColor(d,maxd){const t=Math.min(1,d/maxd);const r=Math.round(40+215*(1-t)),g=Math.round(200*t+55*(1-t)),b=Math.round(255*t);return `rgb(${r},${g},${b})`}
+let maxR=1000;for(const k of revKeys)for(const p of P.revs[k].p)maxR=Math.max(maxR,p[1]);maxR=Math.min(maxR,12000);
+function drawTop(rev){const c=$('top'),x=c.getContext('2d'),W=c.width,cx=W/2,cy=W/2,R=maxR/1000*1.05,s=(W/2-10)/R;x.clearRect(0,0,W,W);
+x.strokeStyle=col('--line');x.fillStyle=col('--muted');x.font='18px system-ui';
+const step=R>6?2:1;for(let m=step;m<=R;m+=step){x.beginPath();x.arc(cx,cy,m*s,0,7);x.stroke();x.fillText(m+' m',cx+4,cy-m*s+18)}
+const hf=P.hfov*Math.PI/180;x.fillStyle='rgba(42,120,214,0.12)';x.beginPath();x.moveTo(cx,cy);x.arc(cx,cy,R*s,-Math.PI/2-hf,-Math.PI/2+hf);x.closePath();x.fill();
+if(rev)for(const [a,d] of rev.p){const t=a*Math.PI/180,inV=Math.abs(b180(a))<P.hfov;x.fillStyle=inV?col('--acc'):col('--muted');x.beginPath();x.arc(cx+d/1000*Math.sin(t)*s,cy-d/1000*Math.cos(t)*s,inV?3.5:2.5,0,7);x.fill()}
+x.fillStyle=col('--ink');x.beginPath();x.arc(cx,cy,6,0,7);x.fill()}
+const imgs={};
+function drawTh(f){const c=$('th');c.width=P.w;c.height=P.h;const x=c.getContext('2d');
+const go=im=>{x.drawImage(im,0,0,P.w,P.h);const maxd=Math.max(1000,...f.pts.map(p=>p[2]));
+for(const [u,v,d] of f.pts){x.fillStyle='#fff';x.beginPath();x.arc(u,v,4,0,7);x.fill();x.fillStyle=rangeColor(d,maxd);x.beginPath();x.arc(u,v,2.8,0,7);x.fill()}};
+if(imgs[f.img])go(imgs[f.img]);else{const im=new Image();im.onload=()=>{imgs[f.img]=im;go(im)};im.src=f.img}}
+function drawPr(f){const c=$('pr'),x=c.getContext('2d'),w=c.width,h=c.height,l=70,r=12,t=12,b=36;x.clearRect(0,0,w,h);
+const pts=f.pts.filter(p=>p[3]!==null).map(p=>[b180(p[4]),p[3]]).sort((a,b)=>a[0]-b[0]);
+x.fillStyle=col('--muted');x.font='16px system-ui';
+if(!pts.length){x.fillText('No LiDAR returns inside this frame',l,h/2);return}
+const vs=pts.map(p=>p[1]),lo=Math.min(...vs),hi=Math.max(...vs),pad=(hi-lo)*0.1||1;
+const X=v=>l+(v+P.hfov)/(2*P.hfov)*(w-l-r),Y=v=>h-b-(v-(lo-pad))/((hi+pad)-(lo-pad))*(h-t-b);
+x.strokeStyle=col('--line');for(const g of [lo,(lo+hi)/2,hi]){x.beginPath();x.moveTo(l,Y(g));x.lineTo(w-r,Y(g));x.stroke();x.fillText(Math.round(g),6,Y(g)+5)}
+for(const g of [-30,0,30])if(Math.abs(g)<P.hfov)x.fillText(g+'°',X(g)-10,h-10);
+x.strokeStyle='#1baf7a';x.lineWidth=2.5;x.beginPath();pts.forEach((p,i)=>i?x.lineTo(X(p[0]),Y(p[1])):x.moveTo(X(p[0]),Y(p[1])));x.stroke();
+$('stats').innerHTML=`<span>Returns in frame <b>${f.pts.length}</b></span><span>Max value <b>${Math.round(hi)}</b> at <b>${pts[vs.indexOf(hi)][0].toFixed(1)}°</b></span>`}
+let i=0,playing=true;const t0=hasF?P.frames[0].t:(P.revs[revKeys[0]]||{t:0}).t;
+function show(k){i=k;$('sl').value=k;
+if(hasF){const f=P.frames[k];drawTop(P.revs[f.rev]);drawTh(f);drawPr(f);$('lab').textContent=`frame ${k+1}/${N} · t = ${(f.t-t0).toFixed(2)} s`}
+else{const r=P.revs[revKeys[k]];drawTop(r);$('lab').textContent=`rev ${k+1}/${N} · t = ${(r.t-t0).toFixed(2)} s`}}
+$('sl').oninput=e=>show(+e.target.value);
+$('play').onclick=()=>{playing=!playing;$('play').textContent=playing?'Pause':'Play'};
+setInterval(()=>{if(playing)show((i+1)%N)},hasF?150:120);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>show(i));show(0);
+</script></body></html>

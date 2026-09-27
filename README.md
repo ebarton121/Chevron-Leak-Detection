@@ -15,6 +15,7 @@ leak_sync/sync.py           association, projection, time-offset estimation
 leak_sync/repair_export.py  fixes old lidar_output_*.xlsx exports
 scripts/record.py           record both sensors together
 scripts/fuse.py             build fused.csv for a session
+scripts/visualize.py        interactive HTML viewer for a session or LiDAR CSV
 scripts/estimate_offset.py  measure thermal latency / camera clock error
 scripts/import_sdcard.py    attach SD-card TIFFs to a LiDAR session
 scripts/repair_export.py    CLI for the export repair
@@ -46,6 +47,7 @@ python tests/test_pipeline.py
 # edit config/sensors.yaml (port, camera index)
 python scripts/record.py --out data/session_01 --seconds 30
 python scripts/fuse.py data/session_01
+python scripts/visualize.py data/session_01   # opens viewer.html in your browser
 ```
 
 ## Sync approach
