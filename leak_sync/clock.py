@@ -35,6 +35,7 @@ class DeviceClockMapper:
         self._last_raw = None
         self._wraps = 0
         self._offsets = []
+        self.offset_ns = None  # current device->host offset, for drift monitoring
 
     def map(self, device_raw: int, host_ns: int) -> int:
         if self._last_raw is not None and device_raw < self._last_raw - self.wrap // 2:
@@ -44,4 +45,5 @@ class DeviceClockMapper:
         self._offsets.append(host_ns - dev_ns)
         if len(self._offsets) > self.window:
             self._offsets.pop(0)
-        return dev_ns + min(self._offsets)
+        self.offset_ns = min(self._offsets)
+        return dev_ns + self.offset_ns

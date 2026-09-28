@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LiDAR recording comparison</title>
+<style>
+:root{--bg:#fafaf8;--card:#fff;--ink:#1a1a18;--muted:#6b6a64;--line:#e3e2dc;--acc:#2a78d6;--soft:#f3f2ee}
+@media (prefers-color-scheme:dark){:root{--bg:#161615;--card:#1f1f1d;--ink:#eeede8;--muted:#9a998f;--line:#33332f;--acc:#4a93ea;--soft:#262624}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:1400px;margin:0 auto;padding:20px}
+h1{font-size:18px;font-weight:600;margin:0 0 2px}.sub{color:var(--muted);margin:0 0 16px}
+.bar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+button{font:inherit;padding:6px 14px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;cursor:pointer}
+button.on{border-color:var(--acc);color:var(--acc)}
+input[type=range]{flex:1;min-width:200px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+h2{font-size:16px;font-weight:600;margin:0 0 10px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:12px}
+.stat{background:var(--soft);border-radius:8px;padding:8px 10px}.stat .k{font-size:11px;color:var(--muted)}.stat .v{font-size:16px;font-weight:600}
+.lbl{font-size:12px;color:var(--muted);margin:10px 0 6px}
+canvas{width:100%;display:block}
+.w3{width:100%;height:380px;border-radius:8px;overflow:hidden;touch-action:none;cursor:grab;background:var(--bg)}
+.leg{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--muted);margin-top:14px}
+.leg span{display:inline-flex;align-items:center;gap:5px}.dot{display:inline-block;width:10px;height:10px;border-radius:50%}
+.sw{display:inline-block;width:11px;height:11px;border-radius:3px}.grad{display:inline-block;width:90px;height:10px;border-radius:3px}
+</style></head><body><main>
+<h1>LiDAR recording comparison</h1><p class="sub" id="sub"></p>
+<div class="bar"><button id="play">Pause</button><input type="range" id="sl" min="0" step="0.05" value="0"><span id="lab" style="min-width:90px;color:var(--muted)"></span>
+<button id="stray" class="on">Highlight stray points: on</button><button id="rot">3D auto-rotate: on</button></div>
+<div class="grid" id="grid"></div>
+<div class="card leg" style="margin-top:16px;display:flex">
+<span><i class="dot" style="background:var(--acc)"></i>Return in camera view</span><span><i class="dot" style="background:var(--muted)"></i>Outside camera view</span>
+<span><i class="dot" style="background:#eb6834"></i>Stray point (closer than the wall behind it, not part of a solid object)</span>
+<span><i class="sw" style="background:rgba(42,120,214,0.2)"></i>Camera field of view</span><span><i class="dot" style="background:var(--ink)"></i>Sensor</span>
+<span>3D height = time <i class="grad" style="background:linear-gradient(90deg,#450054,#3b528c,#21918d,#5ec962,#fde725)"></i> start to end</span>
+<span><i class="dot" style="background:#e34948"></i>3D: current revolution</span><span>Rings every 1 m; both panels use the same scale</span></div>
+<p class="lbl">Stray points: spray or mist would appear as many of these, scattered and short-lived in one area. A few that repeat in the same place every revolution are small fixed objects or edges.</p>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const P=__PAYLOAD__;
+const $=id=>document.getElementById(id);
+const col=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const b180=a=>a>180?a-360:a;
+const names={duration_s:['Duration','s'],revolutions:['Revolutions',''],rotation_hz:['Spin rate','Hz'],median_range_m:['Median distance','m'],max_range_m:['Farthest','m'],stray_per_rev:['Stray points / rev',''],capture_loss_pct:['Capture loss','%'],blocked_deg:['Blocked sector','°']};
+let maxR=1000;for(const s of P.sets)for(const r of s.revs)for(const p of r.p)maxR=Math.max(maxR,p[1]);maxR=Math.min(maxR,8000);
+const Tmax=Math.max(...P.sets.map(s=>s.revs[s.revs.length-1].t));
+$('sl').max=Tmax.toFixed(2);$('sub').textContent=P.sets.map(s=>s.label).join(' vs ')+' — playback synced by elapsed time';
+P.sets.forEach((s,k)=>{const c=document.createElement('div');c.className='card';
+c.innerHTML=`<h2>${s.label}</h2><div class="stats">${Object.entries(s.stats).filter(([key,v])=>v!==null&&names[key]).map(([key,v])=>`<div class="stat"><div class="k">${names[key][0]}</div><div class="v">${v}${names[key][1]?' '+names[key][1]:''}</div></div>`).join('')}</div>
+<p class="lbl">Top-down scan at the current time</p><canvas id="top${k}" width="700" height="700"></canvas>
+<p class="lbl">3D: all revolutions stacked by time (drag to rotate both, scroll to zoom)</p><div class="w3" id="w3_${k}"></div>`;$('grid').appendChild(c)});
+let showStray=true,t=0,playing=true;
+function nearest(s,t){let lo=0,hi=s.revs.length-1;if(t>=s.revs[hi].t)return hi;while(hi-lo>1){const m=(lo+hi)>>1;if(s.revs[m].t<t)lo=m;else hi=m}return (t-s.revs[lo].t<s.revs[hi].t-t)?lo:hi}
+function drawTop(k){const s=P.sets[k],r=s.revs[nearest(s,t)],c=$('top'+k),x=c.getContext('2d'),W=c.width,cx=W/2,cy=W/2,R=maxR/1000*1.05,sc=(W/2-10)/R;x.clearRect(0,0,W,W);
+x.strokeStyle=col('--line');x.fillStyle=col('--muted');x.font='17px system-ui';for(let m=1;m<=R;m++){x.beginPath();x.arc(cx,cy,m*sc,0,7);x.stroke();if(m%2==0||R<5)x.fillText(m+' m',cx+4,cy-m*sc+17)}
+const hf=P.hfov*Math.PI/180;x.fillStyle='rgba(42,120,214,0.12)';x.beginPath();x.moveTo(cx,cy);x.arc(cx,cy,R*sc,-Math.PI/2-hf,-Math.PI/2+hf);x.closePath();x.fill();
+const later=[];for(const p of r.p){if(showStray&&p[2]){later.push(p);continue}const a=p[0]*Math.PI/180,inV=Math.abs(b180(p[0]))<P.hfov;x.fillStyle=inV?col('--acc'):col('--muted');x.beginPath();x.arc(cx+p[1]/1000*Math.sin(a)*sc,cy-p[1]/1000*Math.cos(a)*sc,inV?3.2:2.4,0,7);x.fill()}
+for(const p of later){const a=p[0]*Math.PI/180;x.fillStyle='#eb6834';x.beginPath();x.arc(cx+p[1]/1000*Math.sin(a)*sc,cy-p[1]/1000*Math.cos(a)*sc,5,0,7);x.fill()}
+x.fillStyle=col('--ink');x.beginPath();x.arc(cx,cy,6,0,7);x.fill();
+x.fillStyle=col('--muted');x.fillText(`${later.length} stray this revolution`,12,W-14)}
+/* 3D */
+const V=[];let yaw=0.7,pitch=0.55,dist=Math.max(6,maxR/1000*1.7),auto=true,drag=null;
+const vir=u=>{const s=[[0.27,0,0.33],[0.23,0.32,0.55],[0.13,0.57,0.55],[0.37,0.79,0.38],[0.99,0.91,0.14]];u=Math.max(0,Math.min(0.9999,u))*(s.length-1);const i=Math.floor(u),f=u-i;return s[i].map((v,j)=>v+(s[i+1][j]-v)*f)};
+const pos3=(a,d,y)=>{const r=a*Math.PI/180,m=d/1000;return [m*Math.sin(r),y,-m*Math.cos(r)]};
+const H3=3.2,ts=H3/Math.max(Tmax,1e-6);
+function kill(g){while(g.children.length){const o=g.children.pop();o.geometry&&o.geometry.dispose();o.material&&o.material.dispose()}}
+function buildCloud(v){kill(v.cloud);const pos=[],cc=[],s=v.s;s.revs.forEach((r,n)=>{const y=r.t*ts,c=vir(r.t/Tmax);for(const p of r.p){pos.push(...pos3(p[0],p[1],y));cc.push(...(showStray&&p[2]?[0.92,0.41,0.2]:c))}});
+const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('color',new THREE.Float32BufferAttribute(cc,3));
+v.cloud.add(new THREE.Points(g,new THREE.PointsMaterial({size:0.045,vertexColors:true,transparent:true,opacity:0.85})))}
+function upCur(v){kill(v.cur);const r=v.s.revs[nearest(v.s,t)],pos=[];for(const p of r.p)pos.push(...pos3(p[0],p[1],r.t*ts));
+const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));v.cur.add(new THREE.Points(g,new THREE.PointsMaterial({size:0.09,color:0xe34948})))}
+function init3D(){if(typeof THREE==='undefined'){document.querySelectorAll('.w3').forEach(w=>w.innerHTML='<p style="padding:16px;color:var(--muted)">The 3D view needs an internet connection to load three.js.</p>');return}
+const dark=matchMedia('(prefers-color-scheme: dark)').matches,R0=Math.ceil(maxR/1000);
+P.sets.forEach((s,k)=>{const w=$('w3_'+k),R=new THREE.WebGLRenderer({antialias:true,alpha:true});R.setPixelRatio(Math.min(2,devicePixelRatio));w.appendChild(R.domElement);
+const S=new THREE.Scene(),C=new THREE.PerspectiveCamera(45,1,0.05,200),cloud=new THREE.Group(),cur=new THREE.Group();S.add(cloud);S.add(cur);
+S.add(new THREE.PolarGridHelper(R0,12,R0,64,dark?0x444441:0xd3d1c7,dark?0x33332f:0xe3e2dc));
+S.add(new THREE.Mesh(new THREE.SphereGeometry(0.06,16,12),new THREE.MeshBasicMaterial({color:dark?0xeeede8:0x1a1a18})));
+const hf=P.hfov*Math.PI/180;S.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0.01,0),new THREE.Vector3(-R0*Math.sin(hf),0.01,-R0*Math.cos(hf)),new THREE.Vector3(0,0.01,0),new THREE.Vector3(R0*Math.sin(hf),0.01,-R0*Math.cos(hf))]),new THREE.LineBasicMaterial({color:0x2a78d6})));
+const v={s,R,S,C,w,cloud,cur};V.push(v);buildCloud(v);upCur(v);
+w.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];w.setPointerCapture(e.pointerId)});
+w.addEventListener('pointermove',e=>{if(!drag)return;yaw-=(e.clientX-drag[0])*0.008;pitch=Math.max(-0.3,Math.min(1.45,pitch+(e.clientY-drag[1])*0.006));drag=[e.clientX,e.clientY]});
+w.addEventListener('pointerup',()=>drag=null);
+w.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(2,Math.min(60,dist*(1+Math.sign(e.deltaY)*0.08)))},{passive:false});
+new ResizeObserver(()=>{const W=w.clientWidth,H=w.clientHeight;R.setSize(W,H);C.aspect=W/H;C.updateProjectionMatrix()}).observe(w)});
+(function loop(){if(auto&&!drag)yaw+=0.003;for(const v of V){v.C.position.set(dist*Math.cos(pitch)*Math.sin(yaw),H3/2+dist*Math.sin(pitch),dist*Math.cos(pitch)*Math.cos(yaw));v.C.lookAt(0,H3/2,0);v.R.render(v.S,v.C)}requestAnimationFrame(loop)})()}
+function show(){P.sets.forEach((_,k)=>drawTop(k));V.forEach(upCur);$('sl').value=t;$('lab').textContent='t = '+t.toFixed(1)+' s'}
+$('sl').oninput=e=>{t=+e.target.value;show()};
+$('play').onclick=()=>{playing=!playing;$('play').textContent=playing?'Pause':'Play'};
+$('stray').onclick=()=>{showStray=!showStray;$('stray').textContent='Highlight stray points: '+(showStray?'on':'off');$('stray').classList.toggle('on',showStray);V.forEach(buildCloud);show()};
+$('rot').onclick=()=>{auto=!auto;$('rot').textContent='3D auto-rotate: '+(auto?'on':'off');$('rot').classList.toggle('on',auto)};
+$('rot').classList.add('on');
+setInterval(()=>{if(playing){t+=0.1;if(t>Tmax)t=0;show()}},100);
+init3D();show();
+</script></body></html>

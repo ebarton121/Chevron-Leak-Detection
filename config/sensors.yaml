@@ -60,3 +60,16 @@ extrin_calib:
         0.0,  0.0, -1.0,
         1.0,  0.0,  0.0]
   Pcl: [0.0, 0.05, 0.0]
+
+# --- Real-time health thresholds (scripts/live.py) --------------------------
+health:
+  lidar_min_points_per_s: 2500     # normal is ~5000
+  spin_hz_range: [8.0, 12.0]       # normal is ~9.9
+  max_bad_packet_pct: 2.0          # corrupted serial packets
+  sensor_silence_s: 0.5            # no data for this long = FAIL
+  thermal_min_fps: 15              # half the camera's 30 Hz
+  frozen_s: 2.0                    # identical frames for this long = frozen
+  frozen_mean_abs_diff: 0.05
+  max_latency_ms_p95: 500          # frame in -> fused result out
+  min_associated_frame_frac: 0.5   # frames that got LiDAR returns in the image
+  max_clock_drift_ms_per_min: 20   # LiDAR clock vs laptop clock

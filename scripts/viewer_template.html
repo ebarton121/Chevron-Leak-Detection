@@ -15,16 +15,29 @@ input[type=range]{flex:1;min-width:200px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
 .lbl{font-size:12px;color:var(--muted);margin:0 0 8px}
 canvas{width:100%;display:block}
+.leg{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--muted);margin-top:10px}.leg span{display:inline-flex;align-items:center;gap:5px}
+.sw{display:inline-block;width:11px;height:11px;border-radius:3px}.dot{display:inline-block;width:10px;height:10px;border-radius:50%}
+.grad{display:inline-block;width:90px;height:10px;border-radius:3px}
 .stats{display:flex;gap:20px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:10px}.stats b{color:var(--ink);font-weight:600}
 </style></head><body><main>
 <h1>LiDAR + thermal viewer</h1><p class="sub" id="sub"></p>
 <div class="bar"><button id="play">Pause</button><input type="range" id="sl" min="0" value="0" step="1"><span id="lab" style="min-width:150px;color:var(--muted)"></span></div>
 <div class="grid">
-<div class="card"><p class="lbl">Top-down LiDAR scan (shaded wedge = camera view)</p><canvas id="top" width="800" height="800"></canvas></div>
+<div class="card"><p class="lbl">Top-down LiDAR scan (shaded wedge = camera view)</p><canvas id="top" width="800" height="800"></canvas>
+<div class="leg"><span><i class="dot" style="background:var(--acc)"></i>LiDAR return in camera view</span><span><i class="dot" style="background:var(--muted)"></i>Outside camera view</span><span><i class="sw" style="background:rgba(42,120,214,0.2)"></i>Camera field of view</span><span><i class="dot" style="background:var(--ink)"></i>Sensor</span><span>Rings = distance from sensor</span></div></div>
 <div class="card" id="thCard"><p class="lbl">Thermal frame with associated LiDAR returns (colored by range)</p><canvas id="th"></canvas>
+<div class="leg"><span>Thermal (raw value) <b style="font-weight:500" id="scLo"></b><i class="grad" style="background:linear-gradient(90deg,#000004,#420a68,#932667,#dd513a,#fca50a,#fcffa4)"></i><b style="font-weight:500" id="scHi"></b></span>
+<span>LiDAR range 0 m<i class="grad" id="rgGrad"></i><b style="font-weight:500" id="rgHi"></b></span></div>
 <p class="lbl" style="margin-top:12px">Thermal value at each LiDAR return vs bearing</p><canvas id="pr" width="800" height="260"></canvas>
+<div class="leg"><span><i class="sw" style="background:#1baf7a;height:3px"></i>Thermal value at each LiDAR return (left = left side of image)</span></div>
 <div class="stats" id="stats"></div></div>
-</div></main>
+</div>
+<div class="card" style="margin-top:16px"><div class="bar" style="margin-bottom:8px"><span class="lbl" style="margin:0">3D view (drag to rotate, scroll to zoom)</span>
+<button id="m3t">Scans stacked over time</button><button id="m3w">Thermal draped on scene</button><button id="m3r">Auto-rotate: on</button></div>
+<div id="w3" style="width:100%;height:520px;border-radius:8px;overflow:hidden;touch-action:none;cursor:grab;background:var(--bg)"></div>
+<div class="leg" id="l3"></div><p class="lbl" id="n3" style="margin:8px 0 0"></p></div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 const P=__PAYLOAD__;
 const $=id=>document.getElementById(id);
@@ -46,6 +59,9 @@ if(rev)for(const [a,d] of rev.p){const t=a*Math.PI/180,inV=Math.abs(b180(a))<P.h
 x.fillStyle=col('--ink');x.beginPath();x.arc(cx,cy,6,0,7);x.fill()}
 const imgs={};
 function drawTh(f){const c=$('th');c.width=P.w;c.height=P.h;const x=c.getContext('2d');
+const mdL=Math.max(1000,...f.pts.map(p=>p[2]));$('rgHi').textContent=(mdL/1000).toFixed(1)+' m';
+$('rgGrad').style.background=`linear-gradient(90deg,${rangeColor(0,1)},${rangeColor(0.5,1)},${rangeColor(1,1)})`;
+if(P.scale){$('scLo').textContent=Math.round(P.scale[0]);$('scHi').textContent=Math.round(P.scale[1])}
 const go=im=>{x.drawImage(im,0,0,P.w,P.h);const maxd=Math.max(1000,...f.pts.map(p=>p[2]));
 for(const [u,v,d] of f.pts){x.fillStyle='#fff';x.beginPath();x.arc(u,v,4,0,7);x.fill();x.fillStyle=rangeColor(d,maxd);x.beginPath();x.arc(u,v,2.8,0,7);x.fill()}};
 if(imgs[f.img])go(imgs[f.img]);else{const im=new Image();im.onload=()=>{imgs[f.img]=im;go(im)};im.src=f.img}}
@@ -62,9 +78,68 @@ $('stats').innerHTML=`<span>Returns in frame <b>${f.pts.length}</b></span><span>
 let i=0,playing=true;const t0=hasF?P.frames[0].t:(P.revs[revKeys[0]]||{t:0}).t;
 function show(k){i=k;$('sl').value=k;
 if(hasF){const f=P.frames[k];drawTop(P.revs[f.rev]);drawTh(f);drawPr(f);$('lab').textContent=`frame ${k+1}/${N} · t = ${(f.t-t0).toFixed(2)} s`}
-else{const r=P.revs[revKeys[k]];drawTop(r);$('lab').textContent=`rev ${k+1}/${N} · t = ${(r.t-t0).toFixed(2)} s`}}
+else{const r=P.revs[revKeys[k]];drawTop(r);$('lab').textContent=`rev ${k+1}/${N} · t = ${(r.t-t0).toFixed(2)} s`}
+if(V3.ok)V3.on()}
 $('sl').oninput=e=>show(+e.target.value);
+/* ---------- 3D ---------- */
+const V3={ok:false,mode:'t',on:null};
+function init3D(){const w3=$('w3');
+if(typeof THREE==='undefined'){w3.innerHTML='<p style="padding:20px;color:var(--muted)">The 3D view needs an internet connection to load three.js. The 2D panels above work offline.</p>';return}
+const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+const R=new THREE.WebGLRenderer({antialias:true,alpha:true});R.setPixelRatio(Math.min(2,devicePixelRatio));w3.appendChild(R.domElement);
+const S=new THREE.Scene(),C=new THREE.PerspectiveCamera(45,1,0.05,200);
+let yaw=0.7,pitch=0.55,dist=Math.max(6,maxR/1000*1.6),auto=true,drag=null;const target=new THREE.Vector3(0,1,0);
+const size=()=>{const w=w3.clientWidth,h=w3.clientHeight;R.setSize(w,h);C.aspect=w/h;C.updateProjectionMatrix()};
+w3.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];w3.setPointerCapture(e.pointerId)});
+w3.addEventListener('pointermove',e=>{if(!drag)return;yaw-=(e.clientX-drag[0])*0.008;pitch=Math.max(-0.3,Math.min(1.45,pitch+(e.clientY-drag[1])*0.006));drag=[e.clientX,e.clientY]});
+w3.addEventListener('pointerup',()=>drag=null);
+w3.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(2,Math.min(60,dist*(1+Math.sign(e.deltaY)*0.08)))},{passive:false});
+const Rm=P.cam.R,tv=P.cam.t;
+/* LiDAR frame (x fwd, y left, z up; LDRobot angles clockwise) -> three.js (x right, y up, z toward viewer) */
+const L2T=(x,y,z)=>[-y,z,-x];
+const pol=(a,d)=>{const r=a*Math.PI/180,m=d/1000;return [m*Math.cos(r),-m*Math.sin(r),0]};
+const toCam=p=>[0,1,2].map(i=>Rm[3*i]*p[0]+Rm[3*i+1]*p[1]+Rm[3*i+2]*p[2]+tv[i]);
+const toLid=c=>{const q=[c[0]-tv[0],c[1]-tv[1],c[2]-tv[2]];return [0,1,2].map(i=>Rm[i]*q[0]+Rm[3+i]*q[1]+Rm[6+i]*q[2])};
+const vir=t=>{const s=[[0.27,0,0.33],[0.23,0.32,0.55],[0.13,0.57,0.55],[0.37,0.79,0.38],[0.99,0.91,0.14]];t=Math.max(0,Math.min(0.9999,t))*(s.length-1);const i=Math.floor(t),f=t-i;return s[i].map((v,k)=>v+(s[i+1][k]-v)*f)};
+const stat=new THREE.Group(),dyn=new THREE.Group();S.add(stat,dyn);
+const kill=g=>{while(g.children.length){const o=g.children.pop();o.geometry&&o.geometry.dispose();if(o.material){o.material.map&&o.material.map.dispose();o.material.dispose()}}};
+function grid(){const R0=Math.ceil(maxR/1000);stat.add(new THREE.PolarGridHelper(R0,12,R0,64,dark?0x444441:0xd3d1c7,dark?0x33332f:0xe3e2dc));
+stat.add(new THREE.Mesh(new THREE.SphereGeometry(0.06,16,12),new THREE.MeshBasicMaterial({color:dark?0xeeede8:0x1a1a18})));
+const hf=P.hfov*Math.PI/180,L=R0;stat.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([
+new THREE.Vector3(0,0.01,0),new THREE.Vector3(-L*Math.sin(hf),0.01,-L*Math.cos(hf)),new THREE.Vector3(0,0.01,0),new THREE.Vector3(L*Math.sin(hf),0.01,-L*Math.cos(hf))]),new THREE.LineBasicMaterial({color:0x2a78d6})))}
+const H3=3.2,tA=(P.revs[revKeys[0]]||{t:0}).t,tB=(P.revs[revKeys[revKeys.length-1]]||{t:1}).t,ts=H3/Math.max(tB-tA,1e-6);
+function buildStack(){kill(stat);grid();const pos=[],col=[];
+revKeys.forEach((k,n)=>{const r=P.revs[k],y=(r.t-tA)*ts,c=vir(n/Math.max(1,revKeys.length-1));for(const [a,d] of r.p){const q=L2T(...pol(a,d));pos.push(q[0],y,q[2]);col.push(...c)}});
+const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
+stat.add(new THREE.Points(g,new THREE.PointsMaterial({size:0.05,vertexColors:true,transparent:true,opacity:0.8})));
+target.set(0,H3/2,0);
+$('l3').innerHTML=`<span>Time ${(0).toFixed(0)} s<i class="grad" style="background:linear-gradient(90deg,#450054,#3b528c,#21918d,#5ec962,#fde725)"></i>${(tB-tA).toFixed(1)} s (bottom to top)</span><span><i class="dot" style="background:#eb6834"></i>Current revolution</span><span><i class="sw" style="background:#2a78d6;height:2px"></i>Camera field of view</span><span>Grid = LiDAR scan plane, rings every 1 m</span>`;
+$('n3').textContent='Each LiDAR revolution is placed higher as time passes (color: purple = start, yellow = end). The accent ring is the current moment. Still walls form vertical sheets; slanted or partial traces are things that moved.'}
+function upStack(){kill(dyn);const k=hasF?P.frames[i].rev:revKeys[i],r=P.revs[k];if(!r)return;const y=(r.t-tA)*ts,pos=[];
+for(const [a,d] of r.p){const q=L2T(...pol(a,d));pos.push(q[0],y,q[2])}
+const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));dyn.add(new THREE.Points(g,new THREE.PointsMaterial({size:0.09,color:0xeb6834})))}
+function buildWallBase(){kill(stat);grid();target.set(0,0.3,-Math.min(3,maxR/2000));
+$('l3').innerHTML=`<span>Surface = current thermal frame (same colors as above)</span><span><i class="dot" style="background:#1baf7a"></i>LiDAR returns in camera view</span><span><i class="dot" style="background:var(--muted)"></i>Rest of the scan</span><span><i class="sw" style="background:#2a78d6;height:2px"></i>Camera field of view</span><span>Grid = LiDAR scan plane, rings every 1 m</span>`;
+$('n3').textContent='The current thermal frame, placed in 3D: each image column sits at the distance the LiDAR measured in that direction, and its rows are spread up and down from there. Assumes upright surfaces (walls, tanks, vertical pipe runs). Positions depend on the calibration in config/sensors.yaml.'}
+function upWall(){kill(dyn);const f=P.frames[i];if(!f)return;const c=P.cam,rows=32;
+const pts=f.pts.map(p=>({u:p[0],d:p[2],a:p[4]})).sort((p,q)=>p.u-q.u);
+const pos=[],uv=[],idx=[],gnd=[];
+pts.forEach((p,j)=>{const lp=pol(p.a,p.d),cz=toCam(lp)[2];const g=L2T(...lp);gnd.push(g[0],g[1]+0.01,g[2]);
+for(let k=0;k<=rows;k++){const v=k*P.h/rows,cp=[(p.u-c.cx)/c.fx*cz,(v-c.cy)/c.fy*cz,cz],q=L2T(...toLid(cp));pos.push(...q);uv.push(p.u/P.w,1-v/P.h)}});
+for(let j=0;j<pts.length-1;j++){if(Math.abs(pts[j+1].d-pts[j].d)>Math.max(250,0.12*pts[j].d))continue;for(let k=0;k<rows;k++){const a=j*(rows+1)+k,b=a+rows+1;idx.push(a,b,a+1,b,b+1,a+1)}}
+if(idx.length){const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(idx);
+const tex=new THREE.TextureLoader().load(f.img);dyn.add(new THREE.Mesh(g,new THREE.MeshBasicMaterial({map:tex,side:THREE.DoubleSide})))}
+const r=P.revs[f.rev];if(r){const sp=[];for(const [a,d] of r.p){const q=L2T(...pol(a,d));sp.push(q[0],0.01,q[2])}
+const sg=new THREE.BufferGeometry();sg.setAttribute('position',new THREE.Float32BufferAttribute(sp,3));dyn.add(new THREE.Points(sg,new THREE.PointsMaterial({size:0.05,color:dark?0x9a998f:0x6b6a64})))}
+const gg=new THREE.BufferGeometry();gg.setAttribute('position',new THREE.Float32BufferAttribute(gnd,3));dyn.add(new THREE.Points(gg,new THREE.PointsMaterial({size:0.08,color:0x1baf7a})))}
+function setMode(m){V3.mode=m;$('m3t').style.borderColor=m==='t'?'var(--acc)':'';$('m3w').style.borderColor=m==='w'?'var(--acc)':'';if(m==='t')buildStack();else buildWallBase();V3.on()}
+V3.on=()=>V3.mode==='t'?upStack():upWall();
+$('m3t').onclick=()=>setMode('t');$('m3w').onclick=()=>setMode('w');
+$('m3r').onclick=()=>{auto=!auto;$('m3r').textContent='Auto-rotate: '+(auto?'on':'off')};
+if(!hasF)$('m3w').style.display='none';
+new ResizeObserver(size).observe(w3);size();V3.ok=true;setMode(hasF?'w':'t');
+(function loop(){if(auto&&!drag)yaw+=0.003;C.position.set(target.x+dist*Math.cos(pitch)*Math.sin(yaw),target.y+dist*Math.sin(pitch),target.z+dist*Math.cos(pitch)*Math.cos(yaw));C.lookAt(target);R.render(S,C);requestAnimationFrame(loop)})()}
 $('play').onclick=()=>{playing=!playing;$('play').textContent=playing?'Pause':'Play'};
 setInterval(()=>{if(playing)show((i+1)%N)},hasF?150:120);
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>show(i));show(0);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>show(i));show(0);init3D();
 </script></body></html>

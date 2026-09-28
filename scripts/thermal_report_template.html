@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thermal scan report</title>
+<style>
+:root{--bg:#fafaf8;--card:#fff;--ink:#1a1a18;--muted:#6b6a64;--line:#e3e2dc;--acc:#2a78d6;--soft:#f3f2ee}
+@media (prefers-color-scheme:dark){:root{--bg:#161615;--card:#1f1f1d;--ink:#eeede8;--muted:#9a998f;--line:#33332f;--acc:#4a93ea;--soft:#262624}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:1500px;margin:0 auto;padding:20px}h1{font-size:18px;font-weight:600;margin:0 0 2px}.sub{color:var(--muted);margin:0 0 16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+h2{font-size:16px;font-weight:600;margin:0 0 4px}.find{margin:0 0 12px;color:var(--ink)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px}
+.stat{background:var(--soft);border-radius:8px;padding:8px 10px}.k{font-size:11px;color:var(--muted)}.v{font-size:16px;font-weight:600}
+.bar{display:flex;gap:10px;align-items:center;margin:4px 0 10px}button{font:inherit;padding:5px 12px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;cursor:pointer}
+input[type=range]{flex:1}.pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}.pair img{width:100%;border-radius:6px;display:block}
+.lbl{font-size:12px;color:var(--muted);margin:6px 0 4px}canvas{width:100%;display:block}
+.leg{display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--muted);margin-top:6px}.leg span{display:inline-flex;align-items:center;gap:5px}
+.grad{display:inline-block;width:80px;height:10px;border-radius:3px}.ln{display:inline-block;width:16px;height:3px;border-radius:2px}
+</style></head><body><main>
+<h1>Thermal scan report</h1>
+<p class="sub">Each scan is compared with the first scans of the same recording. Whole-scene drift (camera or room) is removed, so the change map shows <b>local</b> changes only. Cold changes are the leak-type signal (evaporating spray or liquid, expanding gas); warm changes are usually people or heat they leave behind.</p>
+<div class="grid" id="grid"></div>
+<p class="lbl" style="margin-top:14px">The CSVs have no timestamps, so time is shown as scan number. Values are °C from the camera's radiometric export.</p>
+</main>
+<script>
+const P=__PAYLOAD__;const $=id=>document.getElementById(id);
+const col=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function finding(s){
+ if(s.onset_scan===null){const small=s.peak.area>0?` Only small, brief cold spots (at most ${s.peak.area}% of the view, ${s.peak.max_drop} °C), which don't persist.`:'';
+  return `<b>No sustained cold change (no leak-type signal).</b> The main changes are warm (up to ${s.max_warm}% of the view): people, and heat they leave on surfaces.${small}`}
+ return `<b>Cold change detected from scan ${s.onset_scan}.</b> It grows to ${s.peak.area}% of the view by scan ${s.peak.scan}, averaging ${s.peak.drop} °C (down to ${s.peak.max_drop} °C) relative to its surroundings, and ${s.recovered?'fades by the last scan':'is still there at the last scan ('+s.last_area+'%)'}.`}
+P.sets.forEach((s,k)=>{const c=document.createElement('div');c.className='card';const f0=s.frames[0];
+c.innerHTML=`<h2>${s.name.replace(/_/g,' ')}</h2><p class="find">${finding(s)}</p>
+<div class="stats">
+<div class="stat"><div class="k">Scans</div><div class="v">${s.frames.length}</div></div>
+<div class="stat"><div class="k">Sustained cold change</div><div class="v">${s.onset_scan===null?'none':'from scan '+s.onset_scan}</div></div>
+<div class="stat"><div class="k">Peak cold area</div><div class="v">${s.peak.area}%</div></div>
+<div class="stat"><div class="k">Coldest change</div><div class="v">${s.peak.max_drop} °C</div></div>
+<div class="stat"><div class="k">Largest warm area</div><div class="v">${s.max_warm}%</div></div>
+<div class="stat"><div class="k">Whole-scene drift</div><div class="v">${s.drift_total>0?'+':''}${s.drift_total} °C</div></div></div>
+<div class="bar"><button id="pl${k}">Pause</button><input type="range" id="sl${k}" min="0" max="${s.frames.length-1}" value="0"><span id="lb${k}" style="min-width:70px;color:var(--muted)"></span></div>
+<div class="pair"><div><p class="lbl">Temperature</p><img id="t${k}"></div><div><p class="lbl">Local change vs first scans</p><img id="d${k}"></div></div>
+<div class="leg"><span>${s.lo} °C<i class="grad" style="background:linear-gradient(90deg,#000004,#420a68,#932667,#dd513a,#fca50a,#fcffa4)"></i>${s.hi} °C</span>
+<span>−${P.dr} °C<i class="grad" style="background:linear-gradient(90deg,#3b4cc0,#8db0fe,#dddddd,#f49a7b,#b40426)"></i>+${P.dr} °C</span>
+<span><i class="ln" style="background:#00ffff"></i>Cold change region</span><span><i class="ln" style="background:#e62828"></i>Warm change region</span></div>
+<p class="lbl" style="margin-top:12px">Over the recording</p><canvas id="c${k}" width="900" height="260"></canvas>
+<div class="leg"><span><i class="ln" style="background:#2a78d6"></i>Cold area (% of view, left axis)</span><span><i class="ln" style="background:#e34948"></i>Warm area (% of view, left axis)</span><span><i class="ln" style="background:#888780"></i>Whole-scene drift (°C, right axis)</span><span><i class="ln" style="background:#eda100"></i>Current scan</span></div>
+${s.filled>1?`<p class="lbl">${s.filled}% of the view was hidden by something warm in the first scans; its baseline comes from later scans where it was visible.</p>`:''}`;
+$('grid').appendChild(c)});
+const idx=P.sets.map(()=>0),play=P.sets.map(()=>true);
+function chart(k){const s=P.sets[k],c=$('c'+k),x=c.getContext('2d'),w=c.width,h=c.height,l=50,r=50,t=12,b=34,n=s.frames.length;x.clearRect(0,0,w,h);
+const X=i=>l+i/(n-1)*(w-l-r),maxA=Math.max(5,...s.frames.map(f=>Math.max(f.cold_area_pct,f.warm_area_pct)))*1.1,Y=v=>h-b-v/maxA*(h-t-b);
+const dmin=Math.min(-0.5,...s.frames.map(f=>f.drift_c)),dmax=Math.max(0.5,...s.frames.map(f=>f.drift_c)),Yd=v=>h-b-(v-dmin)/(dmax-dmin)*(h-t-b);
+x.strokeStyle=col('--line');x.fillStyle=col('--muted');x.font='15px system-ui';
+for(let g=0;g<=4;g++){const v=maxA*g/4;x.beginPath();x.moveTo(l,Y(v));x.lineTo(w-r,Y(v));x.stroke();x.fillText(Math.round(v)+'%',4,Y(v)+5);x.fillText((dmin+(dmax-dmin)*g/4).toFixed(1),w-r+6,Y(v)+5)}
+for(let i=0;i<n;i+=Math.max(1,Math.round(n/10)))x.fillText(s.frames[i].scan,X(i)-6,h-10);
+x.strokeStyle='#eda100';x.lineWidth=2;x.beginPath();x.moveTo(X(idx[k]),t);x.lineTo(X(idx[k]),h-b);x.stroke();
+const line=(fn,cl,Yf)=>{x.strokeStyle=cl;x.lineWidth=2.5;x.beginPath();s.frames.forEach((f,i)=>i?x.lineTo(X(i),Yf(fn(f))):x.moveTo(X(i),Yf(fn(f))));x.stroke()};
+line(f=>f.drift_c,'#888780',Yd);line(f=>f.warm_area_pct,'#e34948',Y);line(f=>f.cold_area_pct,'#2a78d6',Y)}
+function show(k,i){idx[k]=i;const f=P.sets[k].frames[i];$('t'+k).src=f.t;$('d'+k).src=f.d;$('sl'+k).value=i;
+$('lb'+k).textContent=`scan ${f.scan}`;chart(k)}
+P.sets.forEach((s,k)=>{$('sl'+k).oninput=e=>show(k,+e.target.value);$('pl'+k).onclick=()=>{play[k]=!play[k];$('pl'+k).textContent=play[k]?'Pause':'Play'};show(k,0)});
+setInterval(()=>P.sets.forEach((s,k)=>{if(play[k])show(k,(idx[k]+1)%s.frames.length)}),500);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>P.sets.forEach((_,k)=>chart(k)));
+</script></body></html>

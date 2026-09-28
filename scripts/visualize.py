@@ -3,6 +3,8 @@
   python scripts/visualize.py data/session_01            # LiDAR + thermal session
   python scripts/visualize.py lidar_9_21_A2_repaired.csv  # LiDAR-only CSV
 Writes viewer.html next to the input (or --out PATH) and opens it.
+The 3D panel loads three.js from cdnjs, so it needs an internet connection;
+the 2D panels work offline.
 
 Session mode shows, for each thermal frame: the LiDAR revolution closest in
 time (top-down), the frame with the associated LiDAR returns projected onto it,
@@ -53,7 +55,9 @@ def frame_jpeg(path, lo, hi):
 def build(src: Path, cfg_path: Path, max_frames: int, max_revs: int):
     cfg = load_config(cfg_path)
     payload = {"title": src.name, "frames": [], "revs": [], "w": cfg["cam_width"], "h": cfg["cam_height"],
-               "hfov": float(np.degrees(np.arctan(cfg["cam_cx"] / cfg["cam_fx"])))}
+               "hfov": float(np.degrees(np.arctan(cfg["cam_cx"] / cfg["cam_fx"]))),
+               "cam": {"fx": cfg["cam_fx"], "fy": cfg["cam_fy"], "cx": cfg["cam_cx"], "cy": cfg["cam_cy"],
+                       "R": cfg["extrin_calib"]["Rcl"], "t": cfg["extrin_calib"]["Pcl"]}}
     if src.is_dir():
         lidar = pd.read_csv(src / "lidar_points.csv")
         frames = pd.read_csv(src / "thermal" / "frames.csv")
@@ -63,6 +67,7 @@ def build(src: Path, cfg_path: Path, max_frames: int, max_revs: int):
         samp = [cv2.imread(str(src / "thermal" / f), cv2.IMREAD_UNCHANGED) for f in pick.file[:: max(1, len(pick) // 10)]]
         samp = np.concatenate([(cv2.cvtColor(s, cv2.COLOR_BGR2GRAY) if s.ndim == 3 else s).ravel() for s in samp if s is not None])
         lo, hi = np.percentile(samp, [1, 99])
+        payload["scale"] = [float(lo), float(hi)]
         lidar_ok = lidar[(lidar.distance_mm > 20)]
         rev_t = lidar_ok.groupby("rev").t_ns.median()
         used_revs = set()

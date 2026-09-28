@@ -15,7 +15,11 @@ leak_sync/sync.py           association, projection, time-offset estimation
 leak_sync/repair_export.py  fixes old lidar_output_*.xlsx exports
 scripts/record.py           record both sensors together
 scripts/fuse.py             build fused.csv for a session
-scripts/visualize.py        interactive HTML viewer for a session or LiDAR CSV
+scripts/visualize.py        interactive HTML viewer (2D + 3D) for a session or LiDAR CSV
+scripts/live.py             REAL-TIME pipeline: live fusion + sensor health (or replay a session)
+leak_sync/live.py           streaming engine: sources, fuser, health monitor, sinks
+scripts/compare.py          side-by-side comparison of recordings (stats, scans, 3D, stray points)
+leak_sync/analysis.py       stray-point (spray/mist candidate) detection, recording summaries
 scripts/estimate_offset.py  measure thermal latency / camera clock error
 scripts/import_sdcard.py    attach SD-card TIFFs to a LiDAR session
 scripts/repair_export.py    CLI for the export repair
@@ -47,8 +51,23 @@ python tests/test_pipeline.py
 # edit config/sensors.yaml (port, camera index)
 python scripts/record.py --out data/session_01 --seconds 30
 python scripts/fuse.py data/session_01
-python scripts/visualize.py data/session_01   # opens viewer.html in your browser
+python scripts/visualize.py data/session_01   # opens viewer.html (3D panel needs internet)
 ```
+
+## Real-time mode
+```bash
+python scripts/live.py --out data/live_01 --status-port 8765          # live sensors
+python scripts/live.py --replay data/session_01 --speed 2               # replay, no hardware
+python scripts/live.py --replay data/session_01 --faults "lidar_gap:3-4,frozen:6-8"
+```
+Each thermal frame is fused as soon as the LiDAR points up to 50 ms after it
+have arrived (typical frame-in to result-out: ~60 ms). Every second the health
+monitor checks LiDAR data/rate/gaps/spin rate/serial corruption/clock drift,
+thermal data/frame rate/gaps/frozen video, dropped frames, fusion latency and
+LiDAR-camera association, and reports OK / WARN / FAIL. Results go to the
+screen, `live.jsonl`, and `http://localhost:<port>/status`. Thresholds are in
+the `health:` section of config/sensors.yaml. Other outputs (e.g. Kafka) plug
+in as sinks: any object with `emit(kind, record)`.
 
 ## Sync approach
 1. **One clock.** Both threads stamp with `time.monotonic_ns()` on the same machine.

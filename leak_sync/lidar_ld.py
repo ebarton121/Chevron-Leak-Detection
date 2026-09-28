@@ -76,9 +76,13 @@ def parse_packet(buf: bytes, t_host_ns: int) -> Optional[LidarPacket]:
     return LidarPacket(speed, start / 100.0, end / 100.0, ts, dists, ints, t_host_ns)
 
 
-def iter_packets(read: Callable[[int], Optional[bytes]]) -> Iterator[LidarPacket]:
+def iter_packets(read: Callable[[int], Optional[bytes]], stats: Optional[dict] = None) -> Iterator[LidarPacket]:
     """`read(n)` returns bytes, b"" on timeout (keep going) or None to stop.
-    Resyncs on the 0x54 0x2C header and drops CRC failures."""
+    Resyncs on the 0x54 0x2C header and drops CRC failures. If `stats` is
+    given, stats["packets"] and stats["bad_packets"] are kept up to date."""
+    if stats is not None:
+        stats.setdefault("packets", 0)
+        stats.setdefault("bad_packets", 0)
     buf = bytearray()
     while True:
         chunk = read(512)
@@ -97,20 +101,24 @@ def iter_packets(read: Callable[[int], Optional[bytes]]) -> Iterator[LidarPacket
                 break
             pkt = parse_packet(bytes(buf[:PKT_LEN]), t)
             if pkt is None:
+                if stats is not None:
+                    stats["bad_packets"] += 1
                 del buf[:1]
                 continue
             del buf[:PKT_LEN]
+            if stats is not None:
+                stats["packets"] += 1
             yield pkt
 
 
 POINT_FIELDS = ["t_ns", "rev", "angle_deg", "distance_mm", "intensity", "speed_dps"]
 
 
-def packets_to_points(packets: Iterator[LidarPacket]) -> Iterator[dict]:
+def packets_to_points(packets: Iterator[LidarPacket], mapper: Optional[DeviceClockMapper] = None) -> Iterator[dict]:
     """Device clock -> host clock per packet, then each point offset by its
     angular position at the reported rotation speed. `rev` increments each
     full revolution so a scan can be pulled out as one unit."""
-    mapper = DeviceClockMapper(wrap=30000, units_per_s=1000.0)
+    mapper = mapper or DeviceClockMapper(wrap=30000, units_per_s=1000.0)
     rev, last_start = 0, None
     for p in packets:
         t_last = mapper.map(p.dev_ts_ms, p.t_host_ns)  # timestamp ~ last point
